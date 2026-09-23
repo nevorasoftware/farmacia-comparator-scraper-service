@@ -33,6 +33,8 @@ public class ScrapingScheduler {
     private final PriceHistoryRepository priceHistoryRepository;
     private final ScrapingExecutionRepository scrapingExecutionRepository;
     private final ContentHashService contentHashService;
+    private final com.luppo.farmacia.scraper.service.ai.ProductNormalizer productNormalizer;
+    private final MasterProductRepository masterProductRepository;
 
     // Ejecuta de 8am a 5pm en America/El_Salvador
     @Scheduled(cron = "${scraping.cron:0 0 8-17 * * *}", zone = "${scraping.timezone:America/El_Salvador}")
@@ -106,9 +108,37 @@ public class ScrapingScheduler {
                                     .findByPharmacyIdAndExternalId(pharmacy.getId(), item.getExternalId())
                                     .orElse(null);
 
+                            // Resolver o vincular MasterProduct con Gemini / Normalizador
+                            com.luppo.farmacia.scraper.model.NormalizedProduct norm = productNormalizer.normalize(item.getOriginalName(), null);
+                            MasterProduct masterProduct = null;
+                            if (norm != null && norm.getActiveIngredient() != null) {
+                                List<MasterProduct> existing = masterProductRepository.findByActiveIngredientIgnoreCase(norm.getActiveIngredient());
+                                if (!existing.isEmpty()) {
+                                    masterProduct = existing.get(0);
+                                } else {
+                                    masterProduct = masterProductRepository.save(MasterProduct.builder()
+                                            .name(norm.getName() != null ? norm.getName() : item.getOriginalName())
+                                            .activeIngredient(norm.getActiveIngredient())
+                                            .concentration(norm.getConcentration() != null ? norm.getConcentration() : "")
+                                            .pharmaceuticalForm(norm.getPharmaceuticalForm() != null ? norm.getPharmaceuticalForm() : "Tableta")
+                                            .administrationRoute("Oral")
+                                            .brand(norm.getBrand() != null ? norm.getBrand() : "Comercial")
+                                            .laboratory("Comercial")
+                                            .healthRegistration("REG-" + Math.abs(item.getOriginalName().hashCode() % 1000000))
+                                            .chm("CHM-" + Math.abs(norm.getActiveIngredient().hashCode() % 10000))
+                                            .presentation(item.getPresentation() != null ? item.getPresentation() : "Caja x " + norm.getQuantity())
+                                            .quantity(norm.getQuantity())
+                                            .unit(norm.getUnit())
+                                            .createdAt(OffsetDateTime.now())
+                                            .updatedAt(OffsetDateTime.now())
+                                            .build());
+                                }
+                            }
+
                             if (product == null) {
                                 product = PharmacyProduct.builder()
                                         .pharmacy(pharmacy)
+                                        .masterProduct(masterProduct)
                                         .externalId(item.getExternalId())
                                         .originalName(item.getOriginalName())
                                         .brand(item.getBrand())
@@ -124,6 +154,9 @@ public class ScrapingScheduler {
                                 pharmacyProductRepository.save(product);
                                 created++;
                             } else {
+                                if (masterProduct != null && product.getMasterProduct() == null) {
+                                    product.setMasterProduct(masterProduct);
+                                }
                                 product.setCurrentPrice(item.getPrice());
                                 product.setCurrentOfferPrice(item.getOfferPrice());
                                 product.setIsAvailable(item.getIsAvailable());
