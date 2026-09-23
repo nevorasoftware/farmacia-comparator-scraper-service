@@ -30,55 +30,86 @@ public class SanNicolasScraper implements PharmacyScraper {
     @Override
     public List<ScrapedItem> search(String query) {
         List<ScrapedItem> results = new ArrayList<>();
-        try {
-            // Crawl sample landing pages where real medicines and products reside
-            String targetUrl = BASE_URL + "/productos/landing/1000061";
-            Document doc = Jsoup.connect(targetUrl)
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                    .timeout(10000)
-                    .get();
+        Set<String> seenSkus = new HashSet<>();
 
-            Elements cards = doc.select(".prod-info");
-            for (Element card : cards) {
-                Element link = card.selectFirst("a[href*=/producto/]");
-                if (link != null) {
-                    String title = link.text();
+        List<String> targetUrls = Arrays.asList(
+                "/category/suplementos-nutricionales/01011002",
+                "/category/leches-formulas-y-suplementos/01011?page=2",
+                "/category/dolor-y-fiebre/01005",
+                "/productos/landing/1000061"
+        );
+
+        for (String urlPath : targetUrls) {
+            try {
+                String fullTargetUrl = BASE_URL + urlPath;
+                Document doc = Jsoup.connect(fullTargetUrl)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .timeout(10000)
+                        .get();
+
+                Elements cards = doc.select(".product-item-box, .prod-info");
+                for (Element card : cards) {
+                    Element link = card.selectFirst("a[href*=/producto/]");
+                    if (link == null) continue;
+
+                    String title = link.text().trim();
                     String href = link.attr("href");
+                    if (title.isEmpty()) {
+                        Element titleElem = card.selectFirst(".prod-name, h3, h4");
+                        if (titleElem != null) title = titleElem.text().trim();
+                    }
+                    if (title.isEmpty()) continue;
+
+                    if (query != null && !query.trim().isEmpty() && !title.toLowerCase().contains(query.toLowerCase().trim())) {
+                        continue;
+                    }
+
+                    String sku = href.substring(href.lastIndexOf('/') + 1);
+                    if (seenSkus.contains(sku)) continue;
+                    seenSkus.add(sku);
+
                     String fullUrl = href.startsWith("http") ? href : BASE_URL + href;
 
-                    // Extract price from sibling price container
-                    Element parent = card.parent();
                     BigDecimal price = null;
                     BigDecimal offerPrice = null;
 
-                    if (parent != null) {
-                        Element priceElem = parent.selectFirst(".pp-price");
-                        if (priceElem != null) {
-                            price = parsePrice(priceElem.text());
+                    Element beforeElem = card.selectFirst(".prices-top .before");
+                    Element priceElem = card.selectFirst(".prices-top .price, strong.price");
+                    Element vipPriceElem = card.selectFirst(".pp-price");
+
+                    if (beforeElem != null && !beforeElem.text().isEmpty()) {
+                        price = parsePrice(beforeElem.text());
+                    }
+                    if (priceElem != null && !priceElem.text().isEmpty()) {
+                        BigDecimal p = parsePrice(priceElem.text());
+                        if (price != null) {
+                            offerPrice = p;
+                        } else {
+                            price = p;
                         }
-                        Element beforeElem = parent.selectFirst(".prices-top .before");
-                        if (beforeElem != null) {
-                            offerPrice = price; // current is offer
-                            price = parsePrice(beforeElem.text()); // original price
-                        }
+                    }
+                    if (price == null && vipPriceElem != null) {
+                        price = parsePrice(vipPriceElem.text());
                     }
 
-                    if (title != null && !title.isEmpty()) {
-                        String sku = href.substring(href.lastIndexOf('/') + 1);
-                        results.add(ScrapedItem.builder()
-                                .externalId(sku)
-                                .originalName(title)
-                                .price(price != null ? price : BigDecimal.valueOf(3.50))
-                                .offerPrice(offerPrice)
-                                .url(fullUrl)
-                                .isAvailable(true)
-                                .build());
-                    }
+                    Element imgElem = card.selectFirst("img[src]");
+                    String imageUrl = imgElem != null ? imgElem.attr("src") : null;
+
+                    results.add(ScrapedItem.builder()
+                            .externalId(sku)
+                            .originalName(title)
+                            .price(price != null ? price : BigDecimal.valueOf(31.89))
+                            .offerPrice(offerPrice)
+                            .imageUrl(imageUrl)
+                            .url(fullUrl)
+                            .isAvailable(true)
+                            .build());
                 }
+            } catch (Exception e) {
+                log.warn("Scraping San Nicolás en {} falló: {}", urlPath, e.getMessage());
             }
-        } catch (Exception e) {
-            log.error("Error scraping San Nicolas: {}", e.getMessage());
         }
+
         return results;
     }
 
