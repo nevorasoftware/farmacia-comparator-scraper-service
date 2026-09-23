@@ -1,0 +1,35 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: farmacia-comparator-scraper-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/farmacia_db}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgrespassword}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+    show-sql: false
+
+scraping:
+  enabled: ${SCRAPING_ENABLED:true}
+  cron: "${SCRAPING_CRON:0 0 8-17 * * *}"
+  timezone: "${SCRAPING_TIMEZONE:America/El_Salvador}"
+
+ai:
+  enabled: ${AI_ENABLED:true}
+  provider: ${AI_PROVIDER:gemini}
+  gemini:
+    apiKey: "${GEMINI_API_KEY:}"
+    model: "gemini-1.5-flash"
+
+logging:
+  level:
+    com.luppo.farmacia.scraper: INFO
